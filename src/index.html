@@ -272,11 +272,31 @@
       margin-top: 3rem;
     }
 
+    .table-controls {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .search-input {
+      flex: 1;
+      margin: 0;
+    }
+
     .table-header {
       color: var(--text-muted);
       font-size: 0.8125rem;
       margin-bottom: 0.75rem;
       font-weight: 400;
+    }
+
+    .virtual-scroll-container {
+      height: 37.5rem;
+      overflow-y: auto;
+      border: 0.0625rem solid var(--border-color);
+      border-radius: 0.25rem;
+      background: var(--input-bg);
+      position: relative;
     }
 
     table {
@@ -406,6 +426,7 @@
       color: var(--text-muted);
       font-size: 0.75rem;
       margin-top: auto;
+      padding-top: 1.5rem;
     }
   </style>
 </head>
@@ -440,7 +461,10 @@
       <h2 class="table-header">
         <span>// existing urls</span>
       </h2>
-      <div id="urlsTable"></div>
+      <div class="table-controls">
+        <input type="search" id="searchInput" class="search-input" placeholder="search urls..." />
+      </div>
+      <div id="urlsTable" class="virtual-scroll-container"></div>
     </section>
   </main>
 
@@ -471,10 +495,14 @@
     const shortUrlContainer = document.getElementById("shortUrlContainer");
     const urlInput = document.getElementById("url");
     const slugInput = document.getElementById("slug");
+    const searchInput = document.getElementById("searchInput");
     const urlsTable = document.getElementById("urlsTable");
-    let cachedUrls = [];
+
+    let allUrls = [];
+    let filteredUrls = [];
     let debounceTimer;
     let resultTimeout;
+    const ROW_HEIGHT = 60;
 
     document.addEventListener("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -507,7 +535,7 @@
         return;
       }
       debounceTimer = setTimeout(async () => {
-        const exists = cachedUrls.some((item) => item.shortCode === slug);
+        const exists = allUrls.some((item) => item.shortCode === slug);
         if (exists) {
           slugInput.style.borderColor = "var(--error-bg)";
         } else {
@@ -516,122 +544,131 @@
       }, 300);
     });
 
+    searchInput.addEventListener("input", () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(applySearch, 150);
+    });
+
     async function loadUrls() {
       try {
-        const response = await fetch("/api/urls");
-        const urls = await response.json();
-        cachedUrls = urls;
-        renderUrls();
+        const response = await fetch("/api/urls?limit=1000");
+        const data = await response.json();
+        allUrls = data.urls;
+        applySearch();
         document.body.classList.remove("loading");
       } catch (error) {
-        urlsTable.innerHTML = '<div class="empty">failed to load urls</div>';
+        urlsTable.innerHTML = '<div style="padding: 2.5rem; text-align: center; color: var(--text-muted);">failed to load urls</div>';
         document.body.classList.remove("loading");
       }
     }
 
-    function renderUrls() {
-      if (cachedUrls.length === 0) {
-        urlsTable.innerHTML = '<div class="empty">no urls yet</div>';
-        return;
+    function applySearch() {
+      const query = searchInput.value.toLowerCase().trim();
+      if (!query) {
+        filteredUrls = [...allUrls];
+      } else {
+        filteredUrls = allUrls.filter(item =>
+          item.shortCode.toLowerCase().includes(query) ||
+          item.url?.toLowerCase().includes(query)
+        );
       }
-
-      const urls = [...cachedUrls].sort((a, b) => b.created - a.created);
-
-      let table = urlsTable.querySelector("table");
-      if (!table) {
-        urlsTable.innerHTML = `
-					<table>
-						<thead>
-							<tr>
-								<th>slug</th>
-								<th>url</th>
-								<th>created</th>
-								<th></th>
-							</tr>
-						</thead>
-						<tbody></tbody>
-					</table>
-				`;
-        table = urlsTable.querySelector("table");
-      }
-
-      const tbody = table.querySelector("tbody");
-      const existingRows = new Map();
-      tbody.querySelectorAll("tr[data-short]").forEach((row) => {
-        existingRows.set(row.dataset.short, row);
-      });
-
-      const newRows = new Map();
-      urls.forEach((item) => {
-        const existingRow = existingRows.get(item.shortCode);
-
-        if (existingRow) {
-          const urlCell = existingRow.querySelector(".url-cell");
-          const dateCell = existingRow.querySelector(".date-cell");
-
-          if (urlCell && urlCell.textContent !== item.url) {
-            urlCell.textContent = item.url;
-            urlCell.title = item.url;
-          }
-          if (dateCell) {
-            const dateStr = new Date(item.created).toLocaleDateString();
-            if (dateCell.textContent !== dateStr) {
-              dateCell.textContent = dateStr;
-            }
-          }
-
-          newRows.set(item.shortCode, existingRow);
-        } else {
-          const row = document.createElement("tr");
-          row.dataset.short = item.shortCode;
-          row.innerHTML = `
-						<td class="short-cell"><a href="/${item.shortCode}" target="_blank">/${item.shortCode}</a></td>
-						<td class="url-cell" title="${item.url}">${item.url}</td>
-						<td class="date-cell">${new Date(item.created).toLocaleDateString()}</td>
-						<td class="actions-cell">
-							<button class="btn-small" onclick="editUrl('${item.shortCode}', '${item.url.replace(/'/g, "\\'")}')">edit</button>
-							<button class="btn-small btn-delete" onclick="deleteUrl('${item.shortCode}')">delete</button>
-						</td>
-					`;
-          newRows.set(item.shortCode, row);
-        }
-      });
-
-      existingRows.forEach((row, shortCode) => {
-        if (!newRows.has(shortCode)) {
-          row.remove();
-        }
-      });
-
-      tbody.innerHTML = "";
-      urls.forEach((item) => {
-        const row = newRows.get(item.shortCode);
-        if (row) tbody.appendChild(row);
-      });
-
-      sessionStorage.setItem("hop_urls", urlsTable.innerHTML);
+      renderVirtualList();
       updateUrlCount();
     }
 
+    function renderVirtualList() {
+      const urls = [...filteredUrls].sort((a, b) => b.created - a.created);
+
+      if (urls.length === 0) {
+        urlsTable.innerHTML = '<div style="padding: 2.5rem; text-align: center; color: var(--text-muted);">no urls found</div>';
+        return;
+      }
+
+      const totalHeight = urls.length * ROW_HEIGHT;
+      urlsTable.innerHTML = '';
+
+      const viewport = document.createElement('div');
+      viewport.style.height = `${totalHeight}px`;
+      viewport.style.position = 'relative';
+
+      const table = document.createElement('table');
+      table.style.width = '100%';
+      table.style.borderCollapse = 'collapse';
+      table.style.tableLayout = 'fixed';
+
+      const thead = document.createElement('thead');
+      thead.style.position = 'sticky';
+      thead.style.top = '0';
+      thead.style.background = 'var(--input-bg)';
+      thead.style.zIndex = '10';
+      thead.innerHTML = `
+        <tr>
+          <th style="padding: 0.75rem 0.875rem; text-align: left; border-bottom: 0.0625rem solid var(--border-color); font-size: 0.6875rem; color: var(--accent-primary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03125rem; width: 15%;">short</th>
+          <th style="padding: 0.75rem 0.875rem; text-align: left; border-bottom: 0.0625rem solid var(--border-color); font-size: 0.6875rem; color: var(--accent-primary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03125rem; width: 50%;">url</th>
+          <th style="padding: 0.75rem 0.875rem; text-align: left; border-bottom: 0.0625rem solid var(--border-color); font-size: 0.6875rem; color: var(--accent-primary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03125rem; width: 15%;">created</th>
+          <th style="padding: 0.75rem 0.875rem; text-align: right; border-bottom: 0.0625rem solid var(--border-color); font-size: 0.6875rem; color: var(--accent-primary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03125rem; width: 20%;">actions</th>
+        </tr>
+      `;
+
+      const tbody = document.createElement('tbody');
+      table.appendChild(thead);
+      table.appendChild(tbody);
+      viewport.appendChild(table);
+      urlsTable.appendChild(viewport);
+
+      function updateVisibleRows() {
+        const scrollTop = urlsTable.scrollTop;
+        const viewportHeight = urlsTable.clientHeight;
+        const buffer = 5;
+
+        const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - buffer);
+        const endIndex = Math.min(urls.length, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + buffer);
+
+        tbody.innerHTML = '';
+
+        for (let i = startIndex; i < endIndex; i++) {
+          const item = urls[i];
+          const row = document.createElement('tr');
+          row.style.height = `${ROW_HEIGHT}px`;
+          row.style.position = 'absolute';
+          row.style.top = `${i * ROW_HEIGHT + 41}px`;
+          row.style.left = '0';
+          row.style.right = '0';
+          row.style.display = 'table';
+          row.style.width = '100%';
+          row.style.tableLayout = 'fixed';
+          row.dataset.short = item.shortCode;
+
+          row.innerHTML = `
+            <td style="padding: 0.75rem 0.875rem; border-bottom: 0.0625rem solid var(--border-color); font-size: 0.8125rem; color: var(--accent-bright); font-weight: 700; width: 15%;">
+              <a href="/${item.shortCode}" target="_blank" style="color: var(--accent-bright); text-decoration: none;">/${item.shortCode}</a>
+            </td>
+            <td style="padding: 0.75rem 0.875rem; border-bottom: 0.0625rem solid var(--border-color); font-size: 0.8125rem; max-width: 25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); width: 50%;" title="${item.url}">${item.url}</td>
+            <td style="padding: 0.75rem 0.875rem; border-bottom: 0.0625rem solid var(--border-color); font-size: 0.75rem; color: var(--text-muted); width: 15%;">${new Date(item.created).toLocaleDateString()}</td>
+            <td style="padding: 0.75rem 0.875rem; border-bottom: 0.0625rem solid var(--border-color); text-align: right; width: 20%;">
+              <button onclick="editUrl('${item.shortCode}', '${item.url.replace(/'/g, "\\'")}')" class="btn-small">edit</button>
+              <button onclick="deleteUrl('${item.shortCode}')" class="btn-small btn-delete">delete</button>
+            </td>
+          `;
+
+          tbody.appendChild(row);
+        }
+      }
+
+      urlsTable.addEventListener('scroll', updateVisibleRows);
+      updateVisibleRows();
+    }
+
     function updateUrlCount() {
-      const count = cachedUrls.length;
-      document.getElementById("urlCount").textContent =
-        `${count} url${count !== 1 ? "s" : ""}`;
+      const count = filteredUrls.length;
+      const total = allUrls.length;
+      const text = searchInput.value.trim()
+        ? `${count} of ${total} url${total !== 1 ? 's' : ''}`
+        : `${total} url${total !== 1 ? 's' : ''}`;
+      document.getElementById("urlCount").textContent = text;
     }
 
     loadUrls();
-    urlInput.addEventListener("focus", () => {
-      if (cachedUrls.length === 0) loadUrls();
-    });
-
-    function updateLiveTime() {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString("en-US", {hour12: false});
-      document.getElementById("liveTime").textContent = timeStr;
-    }
-
-    updateLiveTime();
-    setInterval(updateLiveTime, 1000);
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -676,12 +713,12 @@
           await navigator.clipboard.writeText(shortUrl);
         } catch (err) { }
 
-        cachedUrls.unshift({
+        allUrls.unshift({
           shortCode: data.shortCode,
           url: url,
           created: Date.now(),
         });
-        renderUrls();
+        applySearch();
 
         form.reset();
         slugInput.style.borderColor = "var(--border-color)";
@@ -755,9 +792,9 @@
           throw new Error(data.error || "Failed to update URL");
         }
 
-        const item = cachedUrls.find((u) => u.shortCode === shortCode);
+        const item = allUrls.find((u) => u.shortCode === shortCode);
         if (item) item.url = newUrl;
-        renderUrls();
+        applySearch();
       } catch (error) {
         alert(error.message);
       }
@@ -783,8 +820,8 @@
           throw new Error(data.error || "Failed to delete URL");
         }
 
-        cachedUrls = cachedUrls.filter((u) => u.shortCode !== shortCode);
-        renderUrls();
+        allUrls = allUrls.filter((u) => u.shortCode !== shortCode);
+        applySearch();
       } catch (error) {
         alert(error.message);
       }

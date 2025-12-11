@@ -16,15 +16,40 @@ export default {
 		}
 
 		if (url.pathname === '/api/urls' && request.method === 'GET') {
-			const list = await env.HOP.list();
-			const urls = await Promise.all(
+			const searchParams = url.searchParams;
+			const limit = parseInt(searchParams.get('limit') || '100');
+			const cursor = searchParams.get('cursor') || undefined;
+			const search = searchParams.get('search') || '';
+
+			const listOptions: KVNamespaceListOptions = {
+				limit: Math.min(limit, 1000),
+				cursor,
+			};
+
+			const list = await env.HOP.list(listOptions);
+			
+			let urls = await Promise.all(
 				list.keys.map(async (key) => ({
 					shortCode: key.name,
 					url: await env.HOP.get(key.name),
 					created: key.metadata?.created || Date.now(),
 				}))
 			);
-			return new Response(JSON.stringify(urls), {
+
+			// Filter by search term if provided
+			if (search) {
+				const searchLower = search.toLowerCase();
+				urls = urls.filter(item => 
+					item.shortCode.toLowerCase().includes(searchLower) ||
+					item.url?.toLowerCase().includes(searchLower)
+				);
+			}
+
+			return new Response(JSON.stringify({
+				urls,
+				cursor: list.list_complete ? null : list.cursor,
+				hasMore: !list.list_complete,
+			}), {
 				headers: { 'Content-Type': 'application/json' },
 			});
 		}
