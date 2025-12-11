@@ -291,7 +291,8 @@
     }
 
     .virtual-scroll-container {
-      height: 37.5rem;
+      max-height: 37.5rem;
+      min-height: 10rem;
       overflow-y: auto;
       border: 0.0625rem solid var(--border-color);
       border-radius: 0.25rem;
@@ -868,6 +869,17 @@
         alert(error.message);
       }
     };
+
+    // Update live clock
+    function updateClock() {
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      document.getElementById('liveTime').textContent = `${hours}:${minutes}:${seconds}`;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
   </script>
 </body>
 
