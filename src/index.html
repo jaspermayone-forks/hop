@@ -350,12 +350,14 @@
       display: flex;
       gap: 0.5rem;
       align-items: center;
+      width: 100%;
     }
 
     .edit-form input {
       margin: 0;
       padding: 0.5rem 0.625rem;
       font-size: 0.75rem;
+      flex: 1;
     }
 
     .edit-form button {
@@ -426,7 +428,7 @@
 
     // Add auth header to all API requests
     const originalFetch = window.fetch;
-    window.fetch = function(...args) {
+    window.fetch = function (...args) {
       const [url, config] = args;
       if (typeof url === 'string' && url.startsWith('/api/')) {
         const token = localStorage.getItem('hop_session');
@@ -477,6 +479,7 @@
     let filteredUrls = [];
     let debounceTimer;
     let resultTimeout;
+    let deleteClickTracker = {};
     const ROW_HEIGHT = 60;
 
     document.addEventListener("keydown", (e) => {
@@ -508,8 +511,8 @@
 
     async function logout() {
       try {
-        await fetch('/api/logout', { method: 'POST' });
-      } catch (e) {}
+        await fetch('/api/logout', {method: 'POST'});
+      } catch (e) { }
       localStorage.removeItem('hop_session');
       window.location.href = '/login';
     }
@@ -534,7 +537,7 @@
     searchInput.addEventListener("input", () => {
       // Instant search on loaded data
       applySearch();
-      
+
       // Debounced server search for more results
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
@@ -562,11 +565,11 @@
       try {
         const response = await fetch(`/api/urls?limit=1000&search=${encodeURIComponent(query)}`);
         const data = await response.json();
-        
+
         // Merge server results with existing data
         const existingCodes = new Set(allUrls.map(u => u.shortCode));
         const newUrls = data.urls.filter(u => !existingCodes.has(u.shortCode));
-        
+
         if (newUrls.length > 0) {
           allUrls.push(...newUrls);
           applySearch();
@@ -654,7 +657,7 @@
 
         for (let i = startIndex; i < endIndex; i++) {
           const item = urls[i];
-          
+
           const row = document.createElement('div');
           row.style.display = 'grid';
           row.style.gridTemplateColumns = '15% 50% 15% 20%';
@@ -666,7 +669,7 @@
           row.style.borderBottom = '0.0625rem solid var(--border-color)';
           row.style.transition = 'background 0.15s';
           row.dataset.short = item.shortCode;
-          
+
           row.addEventListener('mouseenter', () => {
             row.style.background = '#2d2e28';
           });
@@ -690,8 +693,8 @@
         }
       }
 
-      urlsTable.addEventListener('scroll', updateVisibleRows, { passive: true });
-      
+      urlsTable.addEventListener('scroll', updateVisibleRows, {passive: true});
+
       // Use requestAnimationFrame to ensure DOM is ready before initial render
       requestAnimationFrame(() => {
         updateVisibleRows();
@@ -794,7 +797,7 @@
     window.editUrl = (shortCode, currentUrl) => {
       const row = document.querySelector(`div[data-short="${shortCode}"]`);
       if (!row) return;
-      
+
       const urlCell = row.querySelector(".url-cell");
 
       urlCell.innerHTML = `
@@ -844,29 +847,70 @@
     window.cancelEdit = (shortCode, originalUrl) => {
       const row = document.querySelector(`div[data-short="${shortCode}"]`);
       if (!row) return;
-      
+
       const urlCell = row.querySelector(".url-cell");
       urlCell.innerHTML = originalUrl;
       urlCell.title = originalUrl;
     };
 
     window.deleteUrl = async (shortCode) => {
-      if (!confirm(`Delete /${shortCode}?`)) return;
+      const now = Date.now();
+      const btn = event.target;
 
-      try {
-        const response = await fetch(`/api/urls/${shortCode}`, {
-          method: "DELETE",
-        });
+      // Initialize tracker if doesn't exist
+      if (!deleteClickTracker[shortCode]) {
+        deleteClickTracker[shortCode] = {count: 0, time: 0};
+      }
 
-        if (!response.ok) {
-          const data = await response.json();
-          throw new Error(data.error || "Failed to delete URL");
+      const tracker = deleteClickTracker[shortCode];
+
+      // Reset if too much time passed
+      if (now - tracker.time > 500) {
+        tracker.count = 0;
+        btn.textContent = '🗑️';
+      }
+
+      tracker.count++;
+      tracker.time = now;
+
+      if (tracker.count === 1) {
+        // First click
+        btn.textContent = '❓';
+        setTimeout(() => {
+          if (deleteClickTracker[shortCode]?.count === 1) {
+            delete deleteClickTracker[shortCode];
+            btn.textContent = '🗑️';
+          }
+        }, 500);
+      } else if (tracker.count === 2) {
+        // Second click
+        btn.textContent = '⁉️';
+        setTimeout(() => {
+          if (deleteClickTracker[shortCode]?.count === 2) {
+            delete deleteClickTracker[shortCode];
+            btn.textContent = '🗑️';
+          }
+        }, 500);
+      } else if (tracker.count >= 3) {
+        // Third click - actually delete
+        delete deleteClickTracker[shortCode];
+
+        try {
+          const response = await fetch(`/api/urls/${shortCode}`, {
+            method: "DELETE",
+          });
+
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || "Failed to delete URL");
+          }
+
+          allUrls = allUrls.filter((u) => u.shortCode !== shortCode);
+          applySearch();
+        } catch (error) {
+          alert(error.message);
+          btn.textContent = '🗑️';
         }
-
-        allUrls = allUrls.filter((u) => u.shortCode !== shortCode);
-        applySearch();
-      } catch (error) {
-        alert(error.message);
       }
     };
 
