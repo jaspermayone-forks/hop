@@ -682,7 +682,7 @@
               <a href="/${item.shortCode}" target="_blank" style="color: var(--accent-bright); text-decoration: none;">/${item.shortCode}</a>
             </div>
             <div class="url-cell" style="padding: 0.75rem 0.875rem; font-size: 0.8125rem; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center;" title="${item.url}">${item.url}</div>
-            <div style="padding: 0.75rem 0.875rem; font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center;">${new Date(item.created).toLocaleDateString()}</div>
+            <div style="padding: 0.75rem 0.875rem; font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center;"><span data-created="${item.created}">${formatSmartTime(item.created)}</span></div>
             <div style="padding: 0.75rem 0.875rem; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 0.25rem;">
               <button onclick="editUrl('${item.shortCode}', '${item.url.replace(/'/g, "\\'")}')" class="btn-small">✏️</button>
               <button onclick="deleteUrl('${item.shortCode}')" class="btn-small btn-delete">🗑️</button>
@@ -924,6 +924,39 @@
     }
     updateClock();
     setInterval(updateClock, 1000);
+
+    // Smart time formatting
+    function formatSmartTime(timestamp) {
+      const now = new Date();
+      const date = new Date(timestamp);
+      const diffInSeconds = Math.floor((now - date) / 1000);
+      const diffInMinutes = Math.floor(diffInSeconds / 60);
+      const diffInHours = Math.floor(diffInMinutes / 60);
+      const diffInDays = Math.floor(diffInHours / 24);
+
+      if (diffInSeconds < 60) {
+        return 'just now';
+      } else if (diffInMinutes < 60) {
+        return diffInMinutes === 1 ? '1 min ago' : `${diffInMinutes} mins ago`;
+      } else if (diffInHours < 24) {
+        return diffInHours === 1 ? '1 hour ago' : `${diffInHours} hours ago`;
+      } else if (diffInDays === 1) {
+        return 'yesterday';
+      } else if (diffInDays < 7) {
+        return `${diffInDays} days ago`;
+      } else {
+        return date.toLocaleDateString();
+      }
+    }
+
+    // Update relative times
+    function updateRelativeTimes() {
+      document.querySelectorAll('[data-created]').forEach(el => {
+        const timestamp = parseInt(el.getAttribute('data-created'));
+        el.textContent = formatSmartTime(timestamp);
+      });
+    }
+    setInterval(updateRelativeTimes, 60000); // Update every minute
   </script>
 </body>
 
