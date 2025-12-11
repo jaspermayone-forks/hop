@@ -12,7 +12,10 @@ enabled = true
 binding = "HOP"
 id = "ae7cd39a622b466d876b8410d22d1397"
 
-[rules]
+[vars]
+AUTH_PASSWORD = "changeme"
+
 [[rules]]
 type = "Text"
 globs = ["**/*.html"]
+fallthrough = false

@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import indexHTML from './index.html';
+import loginHTML from './login.html';
 
 export default {
 	async fetch(
@@ -8,6 +9,102 @@ export default {
 		ctx: ExecutionContext,
 	): Promise<Response> {
 		const url = new URL(request.url);
+
+		// Public routes that don't require auth
+		if (url.pathname === '/login' && request.method === 'GET') {
+			return new Response(loginHTML, {
+				headers: { 'Content-Type': 'text/html' },
+			});
+		}
+
+		const isRedirect = url.pathname !== '/' && !url.pathname.startsWith('/api/');
+		if (isRedirect) {
+			const shortCode = url.pathname.slice(1);
+			const targetUrl = await env.HOP.get(shortCode);
+
+			if (targetUrl) {
+				return Response.redirect(targetUrl, 302);
+			}
+
+			return new Response('Short URL not found', {
+				status: 404,
+				headers: { 'Content-Type': 'text/plain' },
+			});
+		}
+
+		// Login endpoint
+		if (url.pathname === '/api/login' && request.method === 'POST') {
+			try {
+				const { password } = await request.json();
+
+				if (password !== env.AUTH_PASSWORD) {
+					return new Response(JSON.stringify({ error: 'Invalid password' }), {
+						status: 401,
+						headers: { 'Content-Type': 'application/json' },
+					});
+				}
+
+				// Generate session token
+				const token = await generateSessionToken();
+				const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+
+				// Store session in KV
+				await env.HOP.put(`session:${token}`, JSON.stringify({ expiresAt }), {
+					expirationTtl: 86400, // 24 hours
+				});
+
+				return new Response(JSON.stringify({ token }), {
+					headers: { 'Content-Type': 'application/json' },
+				});
+			} catch (error) {
+				return new Response(JSON.stringify({ error: 'Invalid request' }), {
+					status: 400,
+					headers: { 'Content-Type': 'application/json' },
+				});
+			}
+		}
+
+		// Logout endpoint
+		if (url.pathname === '/api/logout' && request.method === 'POST') {
+			const authHeader = request.headers.get('Authorization');
+			if (authHeader && authHeader.startsWith('Bearer ')) {
+				const token = authHeader.slice(7);
+				await env.HOP.delete(`session:${token}`);
+			}
+			return new Response(JSON.stringify({ success: true }), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
+
+		// Check auth for all other routes (except / which needs to load first)
+		if (url.pathname !== '/') {
+			const authHeader = request.headers.get('Authorization');
+			if (!authHeader || !authHeader.startsWith('Bearer ')) {
+				return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+					status: 401,
+					headers: { 'Content-Type': 'application/json' },
+				});
+			}
+
+			const token = authHeader.slice(7);
+			const sessionData = await env.HOP.get(`session:${token}`);
+
+			if (!sessionData) {
+				return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+					status: 401,
+					headers: { 'Content-Type': 'application/json' },
+				});
+			}
+
+			const session = JSON.parse(sessionData);
+			if (session.expiresAt < Date.now()) {
+				await env.HOP.delete(`session:${token}`);
+				return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+					status: 401,
+					headers: { 'Content-Type': 'application/json' },
+				});
+			}
+		}
 
 		if (url.pathname === '/' && request.method === 'GET') {
 			return new Response(indexHTML, {
@@ -28,12 +125,32 @@ export default {
 
 			const list = await env.HOP.list(listOptions);
 			
+			// Clean up expired sessions in background
+			const now = Date.now();
+			const sessionKeys = list.keys.filter(key => key.name.startsWith('session:'));
+			for (const key of sessionKeys) {
+				const sessionData = await env.HOP.get(key.name);
+				if (sessionData) {
+					try {
+						const session = JSON.parse(sessionData);
+						if (session.expiresAt < now) {
+							ctx.waitUntil(env.HOP.delete(key.name));
+						}
+					} catch (e) {
+						// Invalid session data, delete it
+						ctx.waitUntil(env.HOP.delete(key.name));
+					}
+				}
+			}
+			
 			let urls = await Promise.all(
-				list.keys.map(async (key) => ({
-					shortCode: key.name,
-					url: await env.HOP.get(key.name),
-					created: key.metadata?.created || Date.now(),
-				}))
+				list.keys
+					.filter(key => !key.name.startsWith('session:'))
+					.map(async (key) => ({
+						shortCode: key.name,
+						url: await env.HOP.get(key.name),
+						created: key.metadata?.created || Date.now(),
+					}))
 			);
 
 			// Filter by search term if provided
@@ -144,20 +261,6 @@ export default {
 			}
 		}
 
-		const shortCode = url.pathname.slice(1);
-		if (shortCode && !shortCode.startsWith('api/')) {
-			const targetUrl = await env.HOP.get(shortCode);
-
-			if (targetUrl) {
-				return Response.redirect(targetUrl, 302);
-			}
-
-			return new Response('Short URL not found', {
-				status: 404,
-				headers: { 'Content-Type': 'text/plain' },
-			});
-		}
-
 		return new Response('Not found', { status: 404 });
 	},
 } satisfies ExportedHandler<Env>;
@@ -166,6 +269,11 @@ function generateShortCode(): string {
 	return nanoid(6);
 }
 
+async function generateSessionToken(): Promise<string> {
+	return nanoid(32);
+}
+
 interface Env {
 	HOP: KVNamespace;
+	AUTH_PASSWORD: string;
 }

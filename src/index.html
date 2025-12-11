@@ -442,7 +442,7 @@
     <section class="form-section">
       <div class="shortcut">
         <kbd>tab</kbd> navigate • <kbd>enter</kbd> submit •
-        <kbd>esc</kbd> clear • <kbd>cmd+k</kbd> focus
+        <kbd>esc</kbd> clear • <kbd>cmd+k</kbd> focus • <kbd>cmd+l</kbd> logout
       </div>
       <form id="shortenForm">
         <div class="form-row">
@@ -474,6 +474,37 @@
   </footer>
 
   <script>
+    // Check for session token
+    const token = localStorage.getItem('hop_session');
+    if (!token) {
+      window.location.href = '/login';
+    }
+
+    // Add auth header to all API requests
+    const originalFetch = window.fetch;
+    window.fetch = function(...args) {
+      const [url, config] = args;
+      if (typeof url === 'string' && url.startsWith('/api/')) {
+        const token = localStorage.getItem('hop_session');
+        if (token) {
+          args[1] = {
+            ...config,
+            headers: {
+              ...(config?.headers || {}),
+              'Authorization': `Bearer ${token}`,
+            },
+          };
+        }
+      }
+      return originalFetch.apply(this, args).then(async (response) => {
+        if (response.status === 302 || response.status === 401) {
+          localStorage.removeItem('hop_session');
+          window.location.href = '/login';
+        }
+        return response;
+      });
+    };
+
     const isReload =
       performance.navigation.type === 1 ||
       performance.getEntriesByType("navigation")[0]?.type === "reload";
@@ -516,6 +547,10 @@
         slugInput.style.borderColor = "var(--border-color)";
         urlInput.focus();
       }
+      if (e.key === "l" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        logout();
+      }
       if (
         (e.key === "c" || e.key === "C") &&
         document.getElementById("shortUrlInput")
@@ -526,6 +561,14 @@
         }
       }
     });
+
+    async function logout() {
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+      } catch (e) {}
+      localStorage.removeItem('hop_session');
+      window.location.href = '/login';
+    }
 
     slugInput.addEventListener("input", (e) => {
       clearTimeout(debounceTimer);
