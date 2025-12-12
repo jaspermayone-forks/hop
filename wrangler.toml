@@ -16,10 +16,6 @@ custom_domain = true
 binding = "HOP"
 id = "ae7cd39a622b466d876b8410d22d1397"
 
-[vars]
-AUTH_PASSWORD = "changeme"
-API_KEY = "your-api-key-here"
-
 [[rules]]
 type = "Text"
 globs = ["**/*.html"]
