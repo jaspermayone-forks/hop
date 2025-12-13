@@ -18,9 +18,9 @@ export default {
 			});
 		}
 
-		const isRedirect = url.pathname !== '/' && !url.pathname.startsWith('/api/');
+		const isRedirect = url.pathname.startsWith('/h/');
 		if (isRedirect) {
-			const shortCode = url.pathname.slice(1);
+			const shortCode = url.pathname.slice(3);
 			const targetUrl = await env.HOP.get(shortCode);
 
 			if (targetUrl) {
