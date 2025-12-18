@@ -24,7 +24,8 @@ fallthrough = false
 # Environment variables
 # For local development, set in .dev.vars file
 # For production, set as secrets:
-# wrangler secret put HOST
+# wrangler secret put HOST                 # e.g., https://hop.dunkirk.sh
+# wrangler secret put REDIRECT_BASE        # e.g., https://dunkirk.sh (optional, defaults to HOST)
 # wrangler secret put INDIKO_URL
 # wrangler secret put INDIKO_CLIENT_ID
 # wrangler secret put INDIKO_CLIENT_SECRET

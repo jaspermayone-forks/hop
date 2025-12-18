@@ -202,7 +202,14 @@ export default {
 		}
 
 		if (url.pathname === '/' && request.method === 'GET') {
-			return new Response(indexHTML, {
+			// Inject redirect base into HTML
+			// If REDIRECT_BASE is not set, use local origin with /h path
+			const redirectBase = env.REDIRECT_BASE || `${new URL(request.url).origin}/h`;
+			const html = indexHTML.replace(
+				'<!-- REDIRECT_BASE -->',
+				`<script>window.REDIRECT_BASE = ${JSON.stringify(redirectBase)};</script>`
+			);
+			return new Response(html, {
 				headers: { 'Content-Type': 'text/html' },
 			});
 		}
@@ -394,6 +401,7 @@ interface Env {
 	HOP: KVNamespace;
 	API_KEY: string;
 	HOST?: string;
+	REDIRECT_BASE?: string;
 	INDIKO_URL: string;
 	INDIKO_CLIENT_ID: string;
 	INDIKO_CLIENT_SECRET: string;
